@@ -1,7 +1,7 @@
-"""Notebook-only Whisper Large-v3 worker with audio checks and safe blank-result handling.
+"""Colab-native Whisper Large-v3 transcription with a lecture-quality preset.
 
-M4A/AAC (and other compressed formats) are first decoded by ffmpeg to a known
-16-kHz mono PCM WAV. Progress/status are newline-delimited JSON on stdout.
+No public server or external transcription API. Decode input using FFmpeg,
+then transcribe with mild repetition mitigation and conservative VAD.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def prepare_audio(
     *,
     reporter: Callable[..., None] = emit,
 ) -> dict[str, Any]:
-    """Extract the first real audio stream and verify decoded PCM samples."""
+    """Extract the first audio stream as 16 kHz mono PCM and measure its level."""
     probe = subprocess.run(
         [
             "ffprobe", "-v", "error", "-select_streams", "a:0",
@@ -60,7 +60,6 @@ def prepare_audio(
     if transcode.returncode != 0:
         raise RuntimeError("오디오 디코딩 실패: " + transcode.stderr.strip()[-500:])
 
-    # Stream the WAV in chunks instead of loading a potentially large M4A into RAM.
     with wave.open(str(decoded_wav), "rb") as wav:
         if wav.getnchannels() != 1 or wav.getsampwidth() != 2 or wav.getframerate() != 16000:
             raise ValueError("오디오 변환 후 파일 형식이 올바르지 않습니다")
@@ -92,8 +91,33 @@ def prepare_audio(
         message=f"오디오 정상 디코딩 · {duration:.1f}초 · 음량 {dbfs:.1f} dBFS",
     )
     if dbfs < -55:
-        reporter("warning", message="음량이 매우 작습니다. 인식 결과가 없으면 원본 녹음 음량을 확인해 주세요")
+        reporter("warning", message="음량이 매우 작습니다. 인식 결과가 없으면 원본 녹음을 확인하세요")
     return {"codec": codec, "duration": duration, "rms_dbfs": dbfs}
+
+
+def transcribe_options(language: str, use_vad: bool, hotwords: str) -> dict[str, Any]:
+    """Conservative lecture settings; never delete text just because it repeats.
+
+    Repetitions may reflect genuine speech. Mitigate decoder loops without
+    blindly removing adjacent, similar sentences from the TXT output.
+    """
+    return {
+        "language": None if language == "auto" else language,
+        "task": "transcribe",
+        "beam_size": 5,
+        "best_of": 5,
+        "vad_filter": use_vad,
+        # Preserve Whisper's conservative built-in VAD configuration.
+        "condition_on_previous_text": False,
+        "repetition_penalty": 1.10,
+        # Some lecture speakers really repeat words; do not forbid all 3-grams.
+        "no_repeat_ngram_size": 0,
+        "temperature": (0.0, 0.2, 0.4, 0.6),
+        "compression_ratio_threshold": 2.4,
+        "log_prob_threshold": -1.0,
+        "no_speech_threshold": 0.6,
+        "hotwords": hotwords or None,
+    }
 
 
 def _recognize(
@@ -102,22 +126,53 @@ def _recognize(
     *,
     language: str,
     use_vad: bool,
+    hotwords: str,
     reporter: Callable[..., None],
 ) -> tuple[str, str]:
     segments, info = model.transcribe(
-        str(source),
-        language=None if language == "auto" else language,
-        beam_size=5,
-        vad_filter=use_vad,
-        task="transcribe",
+        str(source), **transcribe_options(language, use_vad, hotwords)
     )
     duration = max(float(info.duration or 0), 0.01)
-    pieces = []
+    paragraphs: list[str] = []
+    current: list[str] = []
+    paragraph_start: float | None = None
+    previous_end: float | None = None
+    uncertain = 0
+    total_segments = 0
     for segment in segments:
-        pieces.append(segment.text)
-        percent = max(1, min(99, int(float(segment.end) / duration * 100)))
-        reporter("progress", percent=percent, message=f"음성 인식 중 · {percent}%")
-    return "".join(pieces).strip(), str(info.language)
+        total_segments += 1
+        text = segment.text.strip()
+        start = float(segment.start)
+        end = float(segment.end)
+        if text:
+            # Group the literal decoded words into readable lecture paragraphs.
+            # No word replacement/deduplication is applied.
+            if current and (
+                (previous_end is not None and start - previous_end >= 1.8)
+                or (paragraph_start is not None and start - paragraph_start >= 45)
+            ):
+                paragraphs.append(" ".join(current))
+                current = []
+                paragraph_start = None
+            if paragraph_start is None:
+                paragraph_start = start
+            current.append(text)
+            previous_end = end
+        avg_logprob = getattr(segment, "avg_logprob", None)
+        compression = getattr(segment, "compression_ratio", None)
+        if ((avg_logprob is not None and avg_logprob < -1.0)
+                or (compression is not None and compression > 2.4)):
+            uncertain += 1
+        progress = max(1, min(99, int(end / duration * 100)))
+        reporter("progress", percent=progress, message=f"음성 인식 중 · {progress}%")
+    if current:
+        paragraphs.append(" ".join(current))
+    if uncertain:
+        reporter(
+            "warning",
+            message=f"신뢰도가 낮을 수 있는 구간 {uncertain}/{total_segments}개. 결과를 원본과 대조해 주세요.",
+        )
+    return "\n\n".join(paragraphs).strip(), str(info.language)
 
 
 def run_transcription(
@@ -126,16 +181,21 @@ def run_transcription(
     *,
     language: str = "auto",
     vad: bool = True,
+    hotwords: str = "",
+    compute_type: str = "float16",
     model_factory: Callable[..., Any] | None = None,
     reporter: Callable[..., None] = emit,
     audio_preprocessor: Callable[..., dict[str, Any]] = prepare_audio,
 ) -> dict[str, Any]:
-    """Transcribe with VAD recovery; never create a misleading empty TXT."""
+    """Transcribe with conservative VAD; retry only when the result is blank."""
     if not input_file.is_file():
         raise FileNotFoundError(f"Input file not found: {input_file}")
     if language not in {"auto", "ko", "en", "ja", "zh"}:
         raise ValueError("Unsupported recognition language")
-    # Remove partial results from a previous failed invocation.
+    if compute_type not in {"float16", "int8_float16"}:
+        raise ValueError("Unsupported GPU precision")
+    if len(hotwords) > 500:
+        raise ValueError("전문용어 힌트는 500자 이하로 입력해 주세요")
     output_file.unlink(missing_ok=True)
     if model_factory is None:
         from faster_whisper import WhisperModel
@@ -146,17 +206,27 @@ def run_transcription(
         reporter("status", message="음성 파일 검사 및 디코딩 중")
         audio = audio_preprocessor(input_file, normalized, reporter=reporter)
         reporter("status", message="Whisper Large-v3 모델 준비 중 (최초 실행 시 다운로드)")
-        model = model_factory("large-v3", device="cuda", compute_type="int8_float16")
-        reporter("status", message="음성 인식 시작")
+        model = model_factory("large-v3", device="cuda", compute_type=compute_type)
+        reporter("status", message="음성 인식 시작 · 반복 방지 / 이전 문맥 이어받기 OFF")
         text, detected_language = _recognize(
-            model, normalized, language=language, use_vad=vad, reporter=reporter,
+            model,
+            normalized,
+            language=language,
+            use_vad=vad,
+            hotwords=hotwords,
+            reporter=reporter,
         )
         retried_without_vad = False
         if not text and vad:
             retried_without_vad = True
             reporter("warning", message="무음 필터 결과가 비어 있어 VAD를 끄고 자동 재시도합니다")
             text, detected_language = _recognize(
-                model, normalized, language=language, use_vad=False, reporter=reporter,
+                model,
+                normalized,
+                language=language,
+                use_vad=False,
+                hotwords=hotwords,
+                reporter=reporter,
             )
 
     if not text:
@@ -189,9 +259,18 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--language", choices=("auto", "ko", "en", "ja", "zh"), default="auto")
     parser.add_argument("--no-vad", action="store_true")
+    parser.add_argument("--hotwords", default="", help="Comma-separated vocabulary hints")
+    parser.add_argument("--compute-type", choices=("float16", "int8_float16"), default="float16")
     args = parser.parse_args()
     try:
-        run_transcription(args.input, args.output, language=args.language, vad=not args.no_vad)
+        run_transcription(
+            args.input,
+            args.output,
+            language=args.language,
+            vad=not args.no_vad,
+            hotwords=args.hotwords,
+            compute_type=args.compute_type,
+        )
     except Exception as exc:
         emit("error", message=f"{type(exc).__name__}: {exc}")
         return 1
