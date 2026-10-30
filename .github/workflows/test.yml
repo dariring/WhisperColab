@@ -1,0 +1,31 @@
+name: Python tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Validate notebook format and Python syntax
+        run: |
+          python -m py_compile app.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          notebook = json.loads(Path("WhisperColab.ipynb").read_text(encoding="utf-8"))
+          assert notebook["nbformat"] == 4
+          for cell in notebook["cells"]:
+              if cell["cell_type"] == "code":
+                  compile("".join(cell["source"]), "WhisperColab.ipynb", "exec")
+          PY
+      - name: Run tests
+        run: pytest -q
