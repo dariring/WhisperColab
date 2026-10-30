@@ -4,6 +4,14 @@ Google Colab 무료 GPU에서 OpenAI **Whisper Large-v3**를 실행하는 노트
 
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/dariring/WhisperColab/blob/main/WhisperColab.ipynb)
 
+## 2026-10-30 오류 수정: `metadata_errors`
+
+`TypeError: open() got an unexpected keyword argument 'metadata_errors'`는 `faster-whisper 1.2.1`과 `PyAV 18+` 간 API 호환성 문제입니다. 현재는 **PyAV 17.1.0**을 사용하도록 고정했고, 설치 단계에서 WAV 디코딩 호환성을 자동 검증합니다.
+
+**이미 실행 중인 Colab 세션에서 발생했다면:** 노트북을 새로 열어 **STEP 1 설치 셀을 다시 실행**한 다음 **STEP 2에서 파일을 다시 올려** 주세요. 현재 런타임을 그대로 사용해도 됩니다. 복구되지 않으면 런타임을 재시작하고 STEP 1부터 실행해 주세요.
+
+`Warning: You are sending unauthenticated requests to the HF Hub`는 **공개 모델을 로그인 없이 내려받을 때 발생하는 경고**이며 위 오류의 원인이 아닙니다. 공개 모델 이용을 위해 HF_TOKEN을 발급받을 필요는 없습니다.
+
 ## 사용 방법
 
 1. **Open in Colab**을 누르고 **런타임 → 런타임 유형 변경 → T4 GPU**를 설정하세요.
