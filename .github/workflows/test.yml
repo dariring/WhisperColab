@@ -13,11 +13,11 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - name: Install dependencies
-        run: pip install -r requirements.txt -r requirements-dev.txt
-      - name: Validate notebook format and Python syntax
+      - name: Install lightweight test dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Check Python syntax and notebook format
         run: |
-          python -m py_compile app.py
+          python -m py_compile whisper_worker.py
           python - <<'PY'
           import json
           from pathlib import Path
