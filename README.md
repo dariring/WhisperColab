@@ -12,6 +12,19 @@ Google Colab 무료 GPU에서 OpenAI **Whisper Large-v3**를 실행하는 노트
 
 `Warning: You are sending unauthenticated requests to the HF Hub`는 **공개 모델을 로그인 없이 내려받을 때 발생하는 경고**이며 위 오류의 원인이 아닙니다. 공개 모델 이용을 위해 HF_TOKEN을 발급받을 필요는 없습니다.
 
+## M4A 변환 결과가 빈 TXT로 나오는 문제 (2026-10-30 수정)
+
+이전 버전은 Whisper가 음성 구간을 하나도 인식하지 못했을 때도 **빈 TXT를 성공 결과로 처리**했습니다. 정확한 원인은 입력 M4A와 실행 로그가 있어야 확인할 수 있지만, 음성 구간 검출기(VAD)가 음성을 제외하거나 실제 오디오 신호가 누락된 경우에 발생할 수 있습니다.
+
+새 버전:
+- **M4A/AAC 등 오디오 트랙을 ffprobe로 확인한 후, FFmpeg로 16kHz 모노 PCM WAV로 디코딩**하여 Whisper에 전달합니다.
+- **디코딩된 음성의 길이와 RMS 음량(dBFS)을 표시**하고, 완전한 무음이면 즉시 오류를 표시합니다.
+- VAD를 켠 경우 **문자 인식 결과가 비면 VAD 없이 자동으로 한 번 재시도**합니다.
+- 그래도 인식 결과가 비면 **실패로 처리하고 빈 TXT 다운로드를 막습니다.**
+- 음성이 통째로 삭제되지 않도록 **무음 구간 제외는 기본 OFF**로 변경했습니다.
+
+**이미 Colab을 열어둔 상태라면:** 새 노트북을 열고 **STEP 1을 다시 실행해 코드를 갱신한 뒤**, STEP 2에서 M4A를 다시 업로드하세요. STEP 2에서 'Colab 파일 경로 사용'을 선택하여 이전 파일의 경로를 입력해도 됩니다(원본이 남아 있는 경우). 오류 발생 시 STEP 2에 표시되는 오디오 길이·음량·오류 메시지를 확인해 주세요.
+
 ## 사용 방법
 
 1. **Open in Colab**을 누르고 **런타임 → 런타임 유형 변경 → T4 GPU**를 설정하세요.
@@ -31,7 +44,7 @@ Colab 업로드 창까지 작동하지 않는 환경에서는 **왼쪽 파일 �
 
 - OpenAI Whisper **Large-v3** 가중치 기반, \`faster-whisper\` / \`CTranslate2\`, GPU \`int8_float16\`
 - Colab **노트북 기본 폼 UI**로 언어 선택 및 VAD 무음 구간 필터 조절
-- **업로드 후 자동 변환**, 진행률 표시, 결과 미리보기, TXT 자동 다운로드
+- **업로드 후 자동 변환**, 음성 길이/음량 검사, 빈 결과 재시도, 진행률 표시, 결과 미리보기, TXT 자동 다운로드
 - 75MB 이하 파일 지원: MP3, WAV, M4A, FLAC, OGG, OPUS, AAC, MP4, WEBM, WMA, AIFF, MKV
 - 변환 결과: \`/content/whispercolab/results/\` (STEP 3에서 다시 다운로드 가능)
 - 외부 웹서버, TryCloudflare, OpenAI API 키 불필요
