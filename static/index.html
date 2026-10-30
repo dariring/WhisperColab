@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>WhisperColab — Audio to Text</title>
+  <style>
+    :root { font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Noto Sans KR", system-ui, sans-serif; color: #18212e; background: #f7f8fb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; }
+    .shell { width: min(820px, calc(100% - 36px)); margin: 0 auto; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 34px 0; }
+    .brand { display: flex; gap: 12px; align-items: center; font-size: 17px; font-weight: 750; letter-spacing: -.6px; }
+    .logo { display: grid; place-items: center; width: 35px; height: 35px; background: #1d2738; color: white; border-radius: 11px; font-size: 19px; }
+    .status { font-size: 12px; font-weight: 650; color: #4a617f; border: 1px solid #dce2ea; border-radius: 100px; padding: 7px 11px; white-space: nowrap; background: white; }
+    main { padding: 54px 0 80px; }
+    .eyebrow { font-size: 12px; font-weight: 800; letter-spacing: 1.8px; color: #5872a1; text-transform: uppercase; }
+    h1 { margin: 15px 0 13px; font-size: clamp(34px, 6vw, 53px); font-weight: 780; line-height: 1.17; letter-spacing: -2.8px; }
+    .lede { color: #6b778a; font-size: 16px; line-height: 1.8; margin: 0 0 39px; }
+    .panel { border: 1px solid #e5e9f1; background: white; border-radius: 22px; padding: 28px; box-shadow: 0 12px 42px rgba(30, 52, 83, .05); }
+    .upload { position: relative; text-align: center; border: 1.5px dashed #cbd5e5; border-radius: 16px; background: #fafcff; padding: 44px 15px; outline: none; cursor: pointer; transition: background .15s, border-color .15s; }
+    .upload:is(:hover, :focus-visible, .dragover) { background: #eff5ff; border-color: #648bd4; }
+    .upload-icon { width: 49px; height: 49px; margin: 0 auto 17px; display: grid; place-items: center; border-radius: 15px; color: #466fae; background: #e8f0fd; font-size: 25px; }
+    .upload strong { display: block; font-size: 16px; letter-spacing: -.4px; }
+    .muted { color: #7c899b; font-size: 13px; line-height: 1.6; }
+    .upload .muted { margin-top: 8px; }
+    .options { display: flex; gap: 20px; flex-wrap: wrap; align-items: end; margin-top: 27px; }
+    .field { display: flex; flex-direction: column; gap: 9px; flex: 1; min-width: 170px; }
+    .field label, .toggle span { font-size: 13px; font-weight: 690; color: #4b5970; }
+    select { width: 100%; padding: 11px 13px; border-radius: 10px; border: 1px solid #dfe5ed; background: #fff; color: #1e2b3f; font: inherit; font-size: 14px; }
+    .toggle { display: flex; gap: 10px; align-items: center; min-height: 44px; cursor: pointer; }
+    .toggle input { width: 17px; height: 17px; accent-color: #3d6dc3; }
+    .notice { margin: 23px 0 0; color: #8b96a7; font-size: 12px; line-height: 1.7; }
+    .job { margin-top: 21px; padding: 23px; background: #fff; border: 1px solid #e5e9f1; border-radius: 18px; }
+    .job[hidden], .results[hidden], .error[hidden] { display: none; }
+    .row { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    .filename { font-weight: 700; overflow-wrap: anywhere; font-size: 14px; }
+    .progress { margin-top: 18px; height: 7px; border-radius: 15px; background: #e7edf6; overflow: hidden; }
+    .bar { width: 0; height: 100%; background: #527bc4; transition: width .3s; border-radius: inherit; }
+    .job p { margin: 13px 0 0; }
+    .results { margin-top: 25px; }
+    .results h2 { margin: 0; font-size: 19px; letter-spacing: -.6px; }
+    .buttons { display: flex; gap: 10px; }
+    button, .download { display: inline-flex; align-items: center; justify-content: center; appearance: none; border: 1px solid #d8e0ed; border-radius: 10px; padding: 10px 15px; font-size: 13px; font-weight: 700; cursor: pointer; background: #fff; color: #293a53; font-family: inherit; text-decoration: none; }
+    .download { background: #202e43; color: #fff; border-color: #202e43; }
+    button:hover, .download:hover { filter: brightness(.94); }
+    pre { box-sizing: border-box; white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; font-size: 14px; color: #3d4d64; background: #fff; border: 1px solid #e5e9f1; border-radius: 16px; padding: 23px; line-height: 1.9; max-height: 500px; overflow-y: auto; }
+    .error { margin-top: 16px; padding: 14px 17px; font-size: 13px; color: #953d3d; border: 1px solid #f1d7d7; border-radius: 12px; background: #fff7f7; line-height: 1.7; }
+    footer { padding: 16px 0 38px; color: #9aa5b4; font-size: 12px; text-align: center; }
+    @media (max-width: 580px) {
+      header { padding-top: 22px; } main { padding-top: 30px; }
+      .panel { padding: 15px; border-radius: 17px; }
+      .upload { padding: 35px 12px; }
+      h1 { letter-spacing: -1.5px; }
+      .row.results-head { align-items: start; flex-direction: column; }
+      .buttons { width: 100%; }
+      .buttons > * { flex: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div class="brand"><div class="logo" aria-hidden="true">✦</div> WhisperColab</div>
+      <div class="status">Whisper Large-v3 · GPU</div>
+    </header>
+    <main>
+      <div class="eyebrow">Audio → Text</div>
+      <h1>말하는 순간을<br>텍스트로 남기세요.</h1>
+      <p class="lede">음성 파일을 올리면 Whisper Large-v3가 자동으로 분석합니다.<br>변환이 끝나면 텍스트를 확인하고 TXT 파일로 저장할 수 있습니다.</p>
+      <section class="panel" aria-label="파일 업로드">
+        <div id="dropzone" class="upload" tabindex="0" role="button" aria-label="음성 파일 선택 또는 끌어다 놓기">
+          <div class="upload-icon" aria-hidden="true">↑</div>
+          <strong>파일을 여기에 끌어다 놓으세요</strong>
+          <div class="muted">또는 클릭하여 파일 선택 · 선택 즉시 자동 변환</div>
+          <div class="muted">MP3, WAV, M4A, FLAC, OGG, OPUS, AAC 등 · 최대 75MB</div>
+        </div>
+        <input id="file" type="file" hidden accept=".mp3,.wav,.m4a,.flac,.ogg,.opus,.aac,.mp4,.webm,.wma,.aiff,.mkv,audio/*">
+        <div class="options">
+          <div class="field">
+            <label for="language">인식 언어</label>
+            <select id="language">
+              <option value="auto">자동 감지 (권장)</option>
+              <option value="ko">한국어</option>
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+              <option value="zh">中文</option>
+            </select>
+          </div>
+          <label class="toggle"><input id="vad" type="checkbox" checked><span>무음 구간 자동 제외</span></label>
+        </div>
+        <p class="notice">파일은 Colab 세션에서 처리되며 외부 음성 인식 API로 전송하지 않습니다. 작업 완료 후 원본 업로드를 삭제하고, 결과 TXT는 최대 1시간 동안 임시 보관합니다.</p>
+      </section>
+
+      <section id="job" class="job" hidden aria-live="polite">
+        <div class="row">
+          <div class="filename" id="filename"></div>
+          <span class="muted" id="percent">0%</span>
+        </div>
+        <div class="progress" role="progressbar" aria-label="변환 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress"><div id="bar" class="bar"></div></div>
+        <p class="muted" id="message">준비 중</p>
+      </section>
+      <div id="error" class="error" hidden role="alert"></div>
+      <section id="results" class="results" hidden>
+        <div class="row results-head">
+          <div>
+            <h2>변환된 텍스트</h2>
+            <p id="meta" class="muted"></p>
+          </div>
+          <div class="buttons">
+            <button id="copy" type="button">텍스트 복사</button>
+            <a id="download" class="download" href="#" download>TXT 다운로드 ↓</a>
+          </div>
+        </div>
+        <pre id="transcript"></pre>
+      </section>
+    </main>
+    <footer>Powered by Whisper Large-v3 · Colab GPU · Cloudflare Quick Tunnel</footer>
+  </div>
+  <script>
+    "use strict";
+    const $ = (id) => document.getElementById(id);
+    let busy = false;
+    let pollTimer = null;
+    let shownText = "";
+
+    function errorMessage(message) {
+      $("error").textContent = message;
+      $("error").hidden = false;
+    }
+    function setProgress(percent, message) {
+      const n = Math.max(0, Math.min(100, Number(percent) || 0));
+      $("bar").style.width = n + "%";
+      $("percent").textContent = n + "%";
+      $("progress").setAttribute("aria-valuenow", String(n));
+      $("message").textContent = message;
+    }
+    async function responseData(response) {
+      let body = {};
+      try { body = await response.json(); } catch (_) {}
+      if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : "요청을 완료하지 못했습니다 (" + response.status + ")");
+      return body;
+    }
+    function complete(status) {
+      busy = false;
+      clearInterval(pollTimer);
+      pollTimer = null;
+      setProgress(100, "텍스트 변환이 완료되었습니다");
+      shownText = status.text || "";
+      $("transcript").textContent = shownText || "(인식된 음성이 없습니다)";
+      $("meta").textContent = status.preview_truncated
+        ? "미리보기는 100,000자까지 표시됩니다. 전체 결과는 TXT 파일에 포함됩니다."
+        : "감지된 언어: " + (status.language || "알 수 없음");
+      $("download").href = status.download_url;
+      $("results").hidden = false;
+    }
+    async function poll(id) {
+      try {
+        const status = await responseData(await fetch("/api/jobs/" + id, { cache: "no-store" }));
+        setProgress(status.progress, status.message);
+        if (status.state === "done") {
+          complete(status);
+        } else if (status.state === "error") {
+          clearInterval(pollTimer); pollTimer = null; busy = false;
+          errorMessage(status.message);
+        }
+      } catch (err) {
+        clearInterval(pollTimer); pollTimer = null; busy = false;
+        errorMessage(err.message + " · 페이지를 새로고침해 다시 시도해 주세요.");
+      }
+    }
+    async function start(file) {
+      if (!file) return;
+      if (busy) { errorMessage("현재 작업이 완료된 뒤 다른 파일을 업로드해 주세요."); return; }
+      if (file.size > 75 * 1024 * 1024) { errorMessage("75MB 이하의 파일을 선택해 주세요."); return; }
+      busy = true;
+      shownText = "";
+      $("error").hidden = true;
+      $("results").hidden = true;
+      $("job").hidden = false;
+      $("filename").textContent = file.name;
+      setProgress(0, "파일을 업로드하고 있습니다");
+      const data = new FormData();
+      data.append("file", file, file.name);
+      data.append("language", $("language").value);
+      data.append("vad", String($("vad").checked));
+      try {
+        const job = await responseData(await fetch("/api/jobs", { method: "POST", body: data }));
+        await poll(job.id);
+        if (busy) pollTimer = setInterval(() => poll(job.id), 1500);
+      } catch (err) {
+        busy = false;
+        errorMessage(err.message);
+      }
+    }
+    $("dropzone").addEventListener("click", () => $("file").click());
+    $("dropzone").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file").click(); }
+    });
+    $("file").addEventListener("change", (e) => {
+      start(e.target.files[0]);
+      e.target.value = "";
+    });
+    ["dragenter", "dragover"].forEach((event) => $("dropzone").addEventListener(event, (e) => {
+      e.preventDefault(); $("dropzone").classList.add("dragover");
+    }));
+    ["dragleave", "drop"].forEach((event) => $("dropzone").addEventListener(event, (e) => {
+      e.preventDefault(); $("dropzone").classList.remove("dragover");
+    }));
+    $("dropzone").addEventListener("drop", (e) => {
+      if (e.dataTransfer.files.length) start(e.dataTransfer.files[0]);
+    });
+    $("copy").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(shownText);
+        $("copy").textContent = "복사 완료 ✓";
+        setTimeout(() => $("copy").textContent = "텍스트 복사", 1800);
+      } catch (_) { errorMessage("텍스트를 복사할 수 없습니다. 직접 선택해 복사해 주세요."); }
+    });
+  </script>
+</body>
+</html>
