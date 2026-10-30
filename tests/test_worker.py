@@ -81,11 +81,15 @@ def test_notebook_uses_native_widgets_not_public_tunnel():
     notebook = json.loads(Path("WhisperColab.ipynb").read_text(encoding="utf-8"))
     assert notebook["nbformat"] == 4
     code = "\n".join("".join(c["source"]) for c in notebook["cells"] if c["cell_type"] == "code")
-    assert "widgets.FileUpload" in code
-    assert "uploader.observe" in code
+    assert "files.upload()" in code
     assert "files.download(" in code
-    assert "threading.Thread" in code
+    assert 'subprocess.Popen(' in code
     assert "whisper_worker.py" in code
+    assert "widgets.FileUpload" not in code
+    assert "uploader.observe" not in code
+    assert 'Colab 파일 경로 사용' in code
+    assert "파일_가져오기" in code
+    assert "자동_TXT_다운로드" in code
     assert "cloudflared" not in code
     assert "uvicorn" not in code
     assert "trycloudflare" not in code.lower()
