@@ -23,8 +23,8 @@ class MockModel:
     def transcribe(self, filename, **kwargs):
         MockModel.calls.append((filename, kwargs))
         segments = [
-            SimpleNamespace(text="안녕하세요.", end=2.0),
-            SimpleNamespace(text=" 테스트입니다.", end=4.0),
+            SimpleNamespace(text="안녕하세요.", start=0.0, end=2.0),
+            SimpleNamespace(text=" 테스트입니다.", start=2.0, end=4.0),
         ]
         return segments, SimpleNamespace(duration=4.0, language="ko")
 
@@ -43,12 +43,19 @@ def test_whisper_large_v3_transcription(tmp_path):
     )
     assert dst.read_text(encoding="utf-8") == "안녕하세요. 테스트입니다.\n"
     assert MockModel.created_with == (
-        ("large-v3",), {"device": "cuda", "compute_type": "int8_float16"}
+        ("large-v3",), {"device": "cuda", "compute_type": "float16"}
     )
     assert MockModel.calls[0][0].endswith(".wav")
-    assert MockModel.calls[0][1] == {
-        "language": "ko", "beam_size": 5, "vad_filter": False, "task": "transcribe",
-    }
+    options = MockModel.calls[0][1]
+    assert options["language"] == "ko"
+    assert options["beam_size"] == 5
+    assert options["vad_filter"] is False
+    assert options["task"] == "transcribe"
+    assert options["condition_on_previous_text"] is False
+    assert options["repetition_penalty"] == 1.10
+    assert options["no_repeat_ngram_size"] == 0
+    assert options["hotwords"] is None
+    assert options["temperature"] == (0.0, 0.2, 0.4, 0.6)
     assert result["language"] == "ko"
     assert result["retried_without_vad"] is False
     assert [e["percent"] for e in events if e["kind"] == "progress"] == [50, 99]
@@ -70,7 +77,7 @@ def test_empty_vad_result_retries_without_filter(tmp_path):
             used_vad.append(kwargs["vad_filter"])
             if kwargs["vad_filter"]:
                 return [], SimpleNamespace(duration=0.0, language="ko")
-            return [SimpleNamespace(text="음성이 들립니다.", end=4.0)], SimpleNamespace(
+            return [SimpleNamespace(text="음성이 들립니다.", start=0.0, end=4.0)], SimpleNamespace(
                 duration=4.0, language="ko"
             )
 
@@ -101,7 +108,7 @@ def test_still_empty_is_error_without_txt(tmp_path, vad, expected_calls):
 
         def transcribe(self, filename, **kwargs):
             calls.append(kwargs["vad_filter"])
-            return [SimpleNamespace(text="   ", end=4.0)], SimpleNamespace(
+            return [SimpleNamespace(text="   ", start=0.0, end=4.0)], SimpleNamespace(
                 duration=4.0, language="ko"
             )
 
@@ -143,3 +150,66 @@ def test_notebook_uses_native_colab_upload():
     for cell in notebook["cells"]:
         if cell["cell_type"] == "code":
             compile("".join(cell["source"]), "WhisperColab.ipynb", "exec")
+
+
+def test_lecture_hotwords_and_readable_paragraphs(tmp_path):
+    src = tmp_path / "philosophy.m4a"
+    src.write_bytes(b"mock audio")
+    dest = tmp_path / "philosophy.txt"
+    model_calls = []
+    class LectureModel:
+        def __init__(self, *args, **kwargs):
+            assert kwargs["compute_type"] == "int8_float16"
+
+        def transcribe(self, filename, **kwargs):
+            model_calls.append(kwargs)
+            return [
+                SimpleNamespace(text=" 공자는 안회를 아꼈습니다.", start=0.0, end=5.0),
+                SimpleNamespace(text=" 자로도 제자입니다.", start=7.5, end=12.0),
+            ], SimpleNamespace(duration=12.0, language="ko")
+
+    results = run_transcription(
+        src, dest, language="ko", hotwords="공자, 안회, 자로, 자공",
+        compute_type="int8_float16",
+        model_factory=LectureModel,
+        audio_preprocessor=mock_audio_preprocessor,
+        reporter=lambda *args, **kwargs: None,
+    )
+    assert model_calls[0]["vad_filter"] is True
+    assert model_calls[0]["hotwords"] == "공자, 안회, 자로, 자공"
+    assert model_calls[0]["condition_on_previous_text"] is False
+    assert dest.read_text(encoding="utf-8") == (
+        "공자는 안회를 아꼈습니다.\n\n자로도 제자입니다.\n"
+    )
+    assert results["characters"] > 0
+
+
+def test_real_repetition_is_not_blindly_removed(tmp_path):
+    src = tmp_path / "repeat.wav"
+    src.write_bytes(b"dummy")
+    dest = tmp_path / "repeat.txt"
+
+    class RepeatedSpeechModel:
+        def __init__(self, *a, **kw):
+            pass
+        def transcribe(self, *a, **kw):
+            return [
+                SimpleNamespace(text=" 다음 주 월요일까지요?", start=0.0, end=2.0),
+                SimpleNamespace(text=" 다음 주 월요일까지요?", start=2.0, end=4.0),
+            ], SimpleNamespace(duration=4.0, language="ko")
+
+    run_transcription(
+        src, dest, model_factory=RepeatedSpeechModel,
+        audio_preprocessor=mock_audio_preprocessor,
+        reporter=lambda *a, **kw: None,
+    )
+    assert dest.read_text(encoding="utf-8").count("다음 주 월요일까지요?") == 2
+
+
+def test_invalid_precision_or_huge_hints(tmp_path):
+    src = tmp_path / "input.wav"
+    src.touch()
+    with pytest.raises(ValueError, match="Unsupported GPU precision"):
+        run_transcription(src, tmp_path / "result.txt", compute_type="bad")
+    with pytest.raises(ValueError, match="500자"):
+        run_transcription(src, tmp_path / "result.txt", hotwords="x" * 501)
