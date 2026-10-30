@@ -1,4 +1,3 @@
 faster-whisper>=1.2,<2
 nvidia-cublas-cu12
 nvidia-cudnn-cu12>=9,<10
-ipywidgets>=8,<9
