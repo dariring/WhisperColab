@@ -1,3 +1,6 @@
 faster-whisper>=1.2,<2
+# faster-whisper 1.2.1 calls av.open(metadata_errors=...); PyAV 18+ removes this argument.
+# Pin known-compatible 17.1.0 until the faster-whisper PyPI release handles newer PyAV.
+av==17.1.0
 nvidia-cublas-cu12
 nvidia-cudnn-cu12>=9,<10
